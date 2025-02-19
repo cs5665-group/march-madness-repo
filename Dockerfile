@@ -1,15 +1,18 @@
-# Use the official Python Alpine image
-FROM python:3.11-alpine
+# Use the official Python Debian slim image
+FROM python:3.11-slim
 
 # Set the working directory inside the container
 WORKDIR /app
 
 # Install system dependencies required for PyTorch & Pandas
-RUN apk add --no-cache \
-    gcc g++ musl-dev \
-    libffi-dev openssl-dev \
-    lapack-dev blas-dev \
-    py3-numpy py3-scipy
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    libffi-dev \
+    libssl-dev \
+    libblas-dev \
+    liblapack-dev \
+    gfortran \
+    && rm -rf /var/lib/apt/lists/*
 
 # Copy the requirements file
 COPY requirements.txt .
