@@ -1,4 +1,5 @@
 import torch
+import pandas as pd
 
 class StarterModel(torch.nn.Module):
     # integrate ingestor.py into the model
@@ -37,3 +38,19 @@ class StarterModel(torch.nn.Module):
         
         # Drop unnecessary columns
         self.reformatted_data = self.reformatted_data.drop(columns=['SeedValue1', 'SeedValue2', 'SeedDiff'])
+
+
+    def generate_all_positive_submissions (self) -> pd.DataFrame:
+        # Generate all positive submissions
+        self.submission_df['Pred'] = 1.0
+        return self.reformatted_data[['ID', 'Pred']]
+        
+    def generate_all_negative_submissions (self) -> pd.DataFrame:
+        # Generate all negative submissions
+        self.submission_df['Pred'] = 0.0
+        return self.reformatted_data[['ID', 'Pred']]
+    
+    def generate_most_frequency_submissions (self) -> pd.DataFrame:
+        # Generate most frequency submissions
+        self.submission_df['Pred'] = self.reformatted_data['Pred'].mean()
+        return self.reformatted_data[['ID', 'Pred']]
