@@ -39,24 +39,17 @@ class Ingestor:
         except ValueError:
             return unselected_seed
     
-    def reformat_and_merge_data_build(self) -> pd.DataFrame:
+    def reformat_and_merge_data_build(self) -> pd.DataFrame:    
         # Reformat the data
         self.submission_df[['Season', 'TeamID1', 'TeamID2']] = self.submission_df['ID'].apply(self.extract_game_info).tolist()
         self.seed_df['SeedValue'] = self.seed_df['Seed'].apply(self.extract_seed_value)
-        
-        # Debug print
-        print("Seed DataFrame:")
-        print(self.seed_df.head())
         
         # Merge seed information for TeamID1
         self.submission_df = pd.merge(self.submission_df, self.seed_df[['Season', 'TeamID', 'SeedValue']],
                                       left_on=['Season', 'TeamID1'], right_on=['Season', 'TeamID'],
                                       how='left')
         self.submission_df = self.submission_df.rename(columns={'SeedValue': 'SeedValue1'}).drop(columns=['TeamID'])
-        
-        # Debug print
-        print("After merging TeamID1:")
-        print(self.submission_df.head())
+
         
         # Merge seed information for TeamID2
         self.submission_df = pd.merge(self.submission_df, self.seed_df[['Season', 'TeamID', 'SeedValue']],
@@ -64,8 +57,9 @@ class Ingestor:
                                       how='left')
         self.submission_df = self.submission_df.rename(columns={'SeedValue': 'SeedValue2'}).drop(columns=['TeamID'])
         
-        # Debug print
-        print("After merging TeamID2:")
-        print(self.submission_df.head())
+         # Fill in missing seed values
+        self.submission_df = self.submission_df.copy() 
+        self.submission_df['SeedValue1'] = self.submission_df['SeedValue1'].fillna(16)
+        self.submission_df['SeedValue2'] = self.submission_df['SeedValue2'].fillna(16)
         
         return self.submission_df
