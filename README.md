@@ -10,3 +10,7 @@
 5. Once you have added the kaggle.json setup, go to the datasets directory and run the following:
 6. kaggle competitions download -c march-machine-learning-mania-2025
 7. unzip kaggle competitions download -c march-machine-learning-mania-2025
+
+# Things to note:
+
+1. The submission file contains a season id with likelihood of wins. Id format 2025_ID1_ID2 represents the probability that the team with the lower TeamId beats the team with the higher TeamID.
