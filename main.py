@@ -1,8 +1,7 @@
-from models.section1.ingestor import Ingestor
-from models.section1.model import StarterModel
+from models.section4.train import train_model
+from models.section4.evaluate import generate_submission
+from models.section4.data_preprocessing import load_and_preprocess_data
 
-<<<<<<< Updated upstream
-=======
 if __name__ == "__main__":
     
     # File paths
@@ -14,17 +13,12 @@ if __name__ == "__main__":
     
     # Train the model
     print("Training the model...")
-    train_model(training_data_path, num_epochs=20, batch_size=64, learning_rate=0.001)
+    train_model(training_data_path, num_epochs=10, batch_size=64, learning_rate=0.001)
     
     # Generate the submission file
     print("Generating the submission file...")
     generate_submission(team_ids, model_path)
     print("Submission file generated successfully.")
     
->>>>>>> Stashed changes
 
-if __name__ == "__main__":
-    ingestor:Ingestor = Ingestor()
-    model:StarterModel = StarterModel(ingestor)
-    model.calculate_predictions()
-    print(model.reformatted_data.head())  # Print the reformatted data to verify
+    
