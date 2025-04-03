@@ -3,7 +3,7 @@ import torch.nn as nn
 
 class MatchupPredictionModel(nn.Module):
     
-    def __init__(self, num_teams: int, emedding_dim=32):
+    def __init__(self, num_teams: int, embedding_dim=32):
         """
         Neural network model for predicting match outcomes.
         Args:
@@ -12,9 +12,9 @@ class MatchupPredictionModel(nn.Module):
         """
         
         super(MatchupPredictionModel, self).__init__()
-        self.team_embedding = nn.Embedding(num_teams, emedding_dim)
+        self.team_embedding = nn.Embedding(num_teams, embedding_dim)
         self.fc = nn.Sequential(
-            nn.Linear(emedding_dim * 2 + 1, 64), # 2 embeddings + score difference
+            nn.Linear(embedding_dim * 2 + 1, 64), # 2 embeddings + score difference
             nn.ReLU(),
             nn.Linear(64, 32),
             nn.ReLU(),
