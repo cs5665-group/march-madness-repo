@@ -3,7 +3,6 @@ import json
 import numpy as np
 import torch.nn as nn
 import torch.optim as optim
-
 from torch.utils.data import DataLoader, TensorDataset
 from attempts.section4.data_preprocessing import load_and_preprocess_data
 from attempts.section4.models.neural_network_model import MatchupPredictionModel
