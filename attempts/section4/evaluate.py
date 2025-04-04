@@ -4,6 +4,7 @@ import json
 import pandas as pd
 from attempts.section4.models.neural_network_model import MatchupPredictionModel
 from attempts.section4.models.log_regs import LogRegsModel
+from attempts.section4.models.binary_class import BinaryClassificationModel
 
 def generate_all_matchups(team_ids, season=2025) -> pd.DataFrame:
     """
@@ -102,6 +103,50 @@ def generate_log_regs_sub(teams_ids, log_reg_path, output_path='log_reg_submissi
     # Make predictions
     with torch.no_grad():
         predictions = log_reg_model(X_submit).squeeze().numpy()
+
+    # Add predictions to the matchups DataFrame
+    matchups['Pred'] = predictions
+    # Save the submission file
+    matchups[['ID', 'Pred']].to_csv(output_path, index=False)
+    print(f"Submission file saved to {output_path}")
+    
+def generate_binnary_class_sub(teams_ids, binary_class_path, output_path='binary_class_submission.csv') -> None:
+    """
+    Generate predictions for all possible matchups in 2025 using the binary classification model.
+    Args:
+        teams_ids (list): List of all team IDs.
+        binary_class_path (str): Path to the trained binary classification model.
+        output_path (str): Path to save the submission file.
+    """
+    # Generate all possible matchups for 2025
+    matchups = generate_all_matchups(teams_ids, season=2025)
+
+    # Extract team IDs
+    matchups['WTeamID'] = matchups['ID'].apply(lambda x: int(x.split('_')[1]))
+    matchups['LTeamID'] = matchups['ID'].apply(lambda x: int(x.split('_')[2]))
+
+    # Prepare input data for the model
+    X_submit = matchups[['WTeamID', 'LTeamID']].values
+    X_submit = torch.tensor(X_submit, dtype=torch.float32)
+
+    # Add a placeholder for score differences
+    score_diff = torch.zeros(X_submit.shape[0], dtype=torch.float32)
+    X_submit = torch.cat((X_submit, score_diff.view(-1, 1)), dim=1)
+
+    # Load the binary classification model
+    with open('model_metadata.json', 'r') as f:
+        metadata = json.load(f)
+        
+    num_teams = metadata['num_teams']
+    
+    binary_class_model = BinaryClassificationModel(num_teams=num_teams)
+    
+    binary_class_model.load_state_dict(torch.load(binary_class_path))
+    binary_class_model.eval()
+
+    # Make predictions
+    with torch.no_grad():
+        predictions = binary_class_model(X_submit).squeeze().numpy()
 
     # Add predictions to the matchups DataFrame
     matchups['Pred'] = predictions
