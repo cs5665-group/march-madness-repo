@@ -1,6 +1,7 @@
 from attempts.section4.data_preprocessing import load_and_preprocess_data
 from attempts.section4.evaluate import generate_nerual_net_sub, generate_log_regs_sub, generate_binnary_class_sub
 from attempts.section4.train import train_nn_model, train_log_reg_model, train_binary_classification_model
+from attempts.section4.plotting import visualize_data_distribution
 
 
 if __name__ == "__main__":
@@ -11,6 +12,10 @@ if __name__ == "__main__":
     neural_net_model = './neural_net_model.pth'
     log_reg_model = './log_reg_model.pth'
     binary_class_model = './binary_class_model.pth'
+    
+    
+    print("Creating visuals")
+    visualize_data_distribution(training_data_path)
         
     X_train, X_test, y_train, y_test, team_ids = load_and_preprocess_data(training_data_path)
     

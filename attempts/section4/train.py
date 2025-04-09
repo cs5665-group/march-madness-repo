@@ -1,5 +1,6 @@
 import torch
 import json
+import os
 import numpy as np
 import torch.nn as nn
 import torch.optim as optim
@@ -9,6 +10,8 @@ from attempts.section4.models.neural_network_model import MatchupPredictionModel
 from attempts.section4.models.log_regs import LogRegsModel
 from attempts.section4.models.binary_class import BinaryClassificationModel
 from sklearn.metrics import brier_score_loss, accuracy_score
+from attempts.section4.loss_tracker import LossTracker
+from attempts.section4.plotting import evaluate_and_visualize_model
 
 def train_nn_model(filepath: str, num_epochs: int = 10, batch_size: int = 64, learning_rate: float = 0.001): 
     
@@ -33,6 +36,9 @@ def train_nn_model(filepath: str, num_epochs: int = 10, batch_size: int = 64, le
     criterion = nn.BCELoss()
     optimizer = optim.Adam(model.parameters(), lr=learning_rate, weight_decay=1e-4)
     
+    # Initialize loss tracker 
+    loss_tracker = LossTracker()
+        
     all_predictions = []
     all_targets = []
     test_loss = 0
@@ -64,8 +70,6 @@ def train_nn_model(filepath: str, num_epochs: int = 10, batch_size: int = 64, le
         
         train_loss = total_loss / len(train_loader)
             
-  
-    
         model.eval()
         val_loss = 0
         with torch.no_grad():
@@ -79,6 +83,7 @@ def train_nn_model(filepath: str, num_epochs: int = 10, batch_size: int = 64, le
         
         val_loss /= len(test_loader)
         
+        loss_tracker.update(train_loss, val_loss)
         # Apply learning rate scheduling
         scheduler.step(val_loss)
         
@@ -91,6 +96,12 @@ def train_nn_model(filepath: str, num_epochs: int = 10, batch_size: int = 64, le
     
     # Load the best model state
     model.load_state_dict(best_model_state)
+    
+    # Create visualization directory
+    os.makedirs('visualizations', exist_ok=True)
+    
+    loss_tracker.plot("Neural Network", save_pth='visualizations/nn_training_history.png')
+    
     all_predictions = np.concatenate(all_predictions)
     all_targets = np.concatenate(all_targets)
     
@@ -101,8 +112,11 @@ def train_nn_model(filepath: str, num_epochs: int = 10, batch_size: int = 64, le
     print(f"Brier Score: {brier_score:.4f}")
     print(f"Accuracy: {accuracy:.4f}")
     
+    # Generate all evaluation plots
+    evaluate_and_visualize_model(model, X_test, y_test, 'Neural Network', 'visualizations')
+    
     # Save the model
-    torch.save(model.state_dict(), 'log_reg_model.pth')
+    torch.save(model.state_dict(), 'neural_net_model.pth')
     with open('model_metadata.json', 'w') as f:
         json.dump({'num_teams': num_teams}, f)
     print("Model saved as log_reg_model.pth")
@@ -110,6 +124,7 @@ def train_nn_model(filepath: str, num_epochs: int = 10, batch_size: int = 64, le
     
 def train_log_reg_model(filepath: str, num_epochs: int = 10, batch_size: int = 64, learning_rate: float = 0.001):
     
+    # Load and preprocess data
     X_train, X_test, y_train, y_test, _ = load_and_preprocess_data(filepath)
 
     # Convert to pytorch tensors
@@ -127,8 +142,14 @@ def train_log_reg_model(filepath: str, num_epochs: int = 10, batch_size: int = 6
     # Initialize model
     num_teams = int(max(X_train[:, 0].max(), X_train[:, 1].max() + 1))
     model = LogRegsModel(num_teams=num_teams)
-    criterion = nn.CrossEntropyLoss()
+    criterion = nn.BCELoss()  # Changed to BCELoss for binary classification with sigmoid
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+    
+    loss_tracker = LossTracker()
+    
+    # Track training and validation losses
+    train_losses = []
+    val_losses = []
     
     model.train()
     for epoch in range(num_epochs):
@@ -140,7 +161,30 @@ def train_log_reg_model(filepath: str, num_epochs: int = 10, batch_size: int = 6
             loss.backward()
             optimizer.step()
             total_loss += loss.item()
-        print(f"Epoch {epoch+1}/{num_epochs}, Loss: {total_loss/len(train_loader):.4f}")
+        
+        train_loss = total_loss / len(train_loader)
+        train_losses.append(train_loss)
+        
+        # Validate after each epoch
+        model.eval()
+        val_loss = 0
+        with torch.no_grad():
+            for X_batch, y_batch in test_loader:
+                predictions = model(X_batch).squeeze()
+                loss = criterion(predictions, y_batch.squeeze())
+                val_loss += loss.item()
+        
+        val_loss /= len(test_loader)
+        val_losses.append(val_loss)
+        
+        loss_tracker.update(train_loss, val_loss)
+        print(f"Epoch {epoch+1}/{num_epochs}, Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}")
+    
+    # Create visualization directory
+    os.makedirs('visualizations', exist_ok=True)
+    
+    # Plot training history
+    loss_tracker.plot("Logistic Regression", save_pth='visualizations/log_reg_training_history.png')
     
     # Evaluate on test data
     all_predictions = []
@@ -167,6 +211,9 @@ def train_log_reg_model(filepath: str, num_epochs: int = 10, batch_size: int = 6
     print(f"Test Loss: {test_loss/len(test_loader):.4f}")
     print(f"Brier Score: {brier_score:.4f}")
     print(f"Accuracy: {accuracy:.4f}")
+    
+    # Generate all evaluation plots
+    evaluate_and_visualize_model(model, X_test, y_test, 'Logistic Regression', 'visualizations')
     
     # Save the model
     torch.save(model.state_dict(), 'log_reg_model.pth')
@@ -203,11 +250,14 @@ def train_binary_classification_model(filepath:str, num_epochs: int = 10, batch_
     # Initialize model
     num_teams = int(max(X_train[:, 0].max(), X_train[:, 1].max() + 1))
     model = BinaryClassificationModel(num_teams=num_teams)
-    criterion = nn.CrossEntropyLoss()
+    criterion = nn.BCELoss()  # Changed to BCELoss for binary classification with sigmoid
     
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
-    model.train()
     
+    # Initialize loss tracker
+    loss_tracker = LossTracker()
+    
+    model.train()
     for epoch in range(num_epochs):
         total_loss = 0
         for X_batch, y_batch in train_loader:
@@ -217,14 +267,35 @@ def train_binary_classification_model(filepath:str, num_epochs: int = 10, batch_
             loss.backward()
             optimizer.step()
             total_loss += loss.item()
-        print(f"Epoch {epoch+1}/{num_epochs}, Loss: {total_loss/len(train_loader):.4f}")
+        
+        train_loss = total_loss / len(train_loader)
+        
+        # Validate after each epoch
+        model.eval()
+        val_loss = 0
+        with torch.no_grad():
+            for X_batch, y_batch in test_loader:
+                predictions = model(X_batch).squeeze()
+                loss = criterion(predictions, y_batch.squeeze())
+                val_loss += loss.item()
+        
+        val_loss /= len(test_loader)
+        
+        loss_tracker.update(train_loss, val_loss)
+        print(f"Epoch {epoch+1}/{num_epochs}, Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}")
+    
+    # Create visualization directory
+    os.makedirs('visualizations', exist_ok=True)
+    
+    # Plot training history
+    loss_tracker.plot("Binary Classification", save_pth='visualizations/binary_class_training_history.png')
         
     # Evaluate on test data
     all_predictions = []
     all_targets = []
     test_loss = 0
     
-    with torch.no_grad(): # TODO: maybe do gradient calculatino and tracking
+    with torch.no_grad():
         for X_batch, y_batch in test_loader:
             predictions = model(X_batch).squeeze()
             loss = criterion(predictions, y_batch.squeeze())
@@ -243,6 +314,9 @@ def train_binary_classification_model(filepath:str, num_epochs: int = 10, batch_
     print(f"Test Loss: {test_loss/len(test_loader):.4f}")
     print(f"Brier Score: {brier_score:.4f}")
     print(f"Accuracy: {accuracy:.4f}")
+    
+    # Generate all evaluation plots
+    evaluate_and_visualize_model(model, X_test, y_test, 'Binary Classification', 'visualizations')
     
     # Save the model
     torch.save(model.state_dict(), 'binary_class_model.pth')
