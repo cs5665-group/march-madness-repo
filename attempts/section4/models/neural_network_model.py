@@ -14,25 +14,8 @@ class MatchupPredictionModel(nn.Module):
         super(MatchupPredictionModel, self).__init__()
         self.team_embedding = nn.Embedding(num_teams, embedding_dim)
         
-        # First layer processes the combined embedding and score difference
-        self.layer1 = nn.Sequential(
-            nn.Linear(embedding_dim * 2 + 1, 128), # 2 embeddings + score difference
-            nn.BatchNorm1d(128),  # Match output size of linear layer
-            nn.LeakyReLU(0.1), 
-            nn.Dropout(dropout_rate)
-        )
-        
-        # Second layer
-        self.layer2 = nn.Sequential(
-            nn.Linear(128, 64),
-            nn.BatchNorm1d(64),
-            nn.LeakyReLU(0.1),
-            nn.Dropout(dropout_rate)
-        )
-        
-        # Third layer
-        self.layer3 = nn.Sequential(
-            nn.Linear(64, 32),
+        self.layer = nn.Sequential(
+            nn.Linear(embedding_dim * 2 + 1, 32),
             nn.BatchNorm1d(32),
             nn.LeakyReLU(0.1),
             nn.Dropout(dropout_rate)
@@ -74,8 +57,6 @@ class MatchupPredictionModel(nn.Module):
         
         features = torch.cat([team1, team2, score_diff], dim=1)
         
-        x = self.layer1(features)
-        x = self.layer2(x)
-        x = self.layer3(x)
+        x = self.layer(features)
         
         return self.output_layer(x)

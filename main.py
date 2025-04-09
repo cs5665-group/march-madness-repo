@@ -9,27 +9,52 @@ if __name__ == "__main__":
     # File paths
     training_data_path = './datasets/MNCAATourneyDetailedResults.csv'
     submission_template_path = './datasets/SampleSubmissionStage1.csv'
-    neural_net_model = './neural_net_model.pth'
-    log_reg_model = './log_reg_model.pth'
-    binary_class_model = './binary_class_model.pth'
+    neural_net_path = './neural_net_model.pth'
+    log_reg_path = './log_reg_model.pth'
+    binary_class_path = './binary_class_model.pth'
     
-    
-    print("Creating visuals")
+    # Create visualizations of the data
+    print("Creating data visualizations...")
     visualize_data_distribution(training_data_path)
         
+    # Load data
     X_train, X_test, y_train, y_test, team_ids = load_and_preprocess_data(training_data_path)
     
-    # Train the model
-    print("Training the model...")
-    train_nn_model(training_data_path, num_epochs=20, batch_size=64, learning_rate=0.01)
-    train_log_reg_model(training_data_path, num_epochs=20, batch_size=64, learning_rate=0.01)
-    train_binary_classification_model(training_data_path, num_epochs=20, batch_size=64, learning_rate=0.01)
+    # Train the models with anti-overfitting configurations
+    print("Training the models...")
+    nn_model, nn_brier, nn_acc = train_nn_model(
+        training_data_path, 
+        num_epochs=20, 
+        batch_size=64, 
+        learning_rate=0.01,
+        dropout_rate=0.7
+    )
     
-    # Generate the submission file
-    print("Generating the submission file...")
-    generate_nerual_net_sub(team_ids, neural_net_model)
-    generate_log_regs_sub(team_ids, log_reg_model)
-    generate_binnary_class_sub(team_ids, binary_class_model)
+    log_model, log_brier, log_acc = train_log_reg_model(
+        training_data_path, 
+        num_epochs=20, 
+        batch_size=64, 
+        learning_rate=0.01
+    )
     
-    print("Submission file generated successfully.")
+    bin_model, bin_brier, bin_acc = train_binary_classification_model(
+        training_data_path, 
+        num_epochs=20, 
+        batch_size=64, 
+        learning_rate=0.01
+    )
     
+    # Generate the submission files
+    print("Generating tournament prediction files...")
+    generate_nerual_net_sub(team_ids, neural_net_path)
+    generate_log_regs_sub(team_ids, log_reg_path)
+    generate_binnary_class_sub(team_ids, binary_class_path)
+    
+    # Print summary of model performance
+    print("\n=== Model Performance Summary ===")
+    print(f"Neural Network:        Brier Score = {nn_brier:.4f}, Accuracy = {nn_acc:.4f}")
+    print(f"Logistic Regression:   Brier Score = {log_brier:.4f}, Accuracy = {log_acc:.4f}")
+    print(f"Binary Classification: Brier Score = {bin_brier:.4f}, Accuracy = {bin_acc:.4f}")
+    
+    print("All visualizations saved to the 'visualizations' directory.")
+    print("Tournament prediction files generated successfully.")

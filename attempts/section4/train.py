@@ -5,11 +5,11 @@ import numpy as np
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader, TensorDataset
-from attempts.section4.data_preprocessing import load_and_preprocess_data, load_time_based_data
+from attempts.section4.data_preprocessing import load_time_based_data
 from attempts.section4.models.neural_network_model import MatchupPredictionModel
 from attempts.section4.models.log_regs import LogRegsModel
 from attempts.section4.models.binary_class import BinaryClassificationModel
-from sklearn.metrics import brier_score_loss, accuracy_score
+from sklearn.metrics import brier_score_loss, accuracy_score, log_loss
 from attempts.section4.loss_tracker import LossTracker
 from attempts.section4.plotting import evaluate_and_visualize_model
 
@@ -21,29 +21,13 @@ class BrierLoss(nn.Module):
     def forward(self, input, target):
         return torch.mean((input - target) ** 2)
 
-def train_nn_model(filepath: str, num_epochs: int = 30, batch_size: int = 64, learning_rate: float = 0.001, dropout_rate: float = 0.5): 
+def train_nn_model(filepath: str, num_epochs: int = 30, batch_size: int = 64, learning_rate: float = 0.001, dropout_rate: float = 0.7): 
     """
-    Train a neural network model with advanced techniques to minimize validation loss
-    
-    Args:
-        filepath (str): Path to the dataset file
-        num_epochs (int): Maximum number of epochs for training
-        batch_size (int): Batch size for training
-        learning_rate (float): Initial learning rate for the optimizer
-        dropout_rate (float): Dropout rate for regularization
-    
-    Returns:
-        tuple: Trained model, brier score, and accuracy
+    Train a neural network model with anti-overfitting techniques
     """
-    # Use time-based data split for more realistic validation
-    try:
-        # Try to load time-based split (recent seasons as validation)
-        X_train, X_val, y_train, y_val, _ = load_time_based_data(filepath)
-        print("Using time-based data split for validation")
-    except:
-        # Fall back to random split if time-based not available
-        X_train, X_val, y_train, y_val, _ = load_and_preprocess_data(filepath)
-        print("Using random data split for validation")
+    # Always use time-based data split for more realistic evaluation
+    X_train, X_val, y_train, y_val, _ = load_time_based_data(filepath)
+    print("Using time-based data split for validation")
     
     # Convert to pytorch tensors
     X_train_tensor = torch.tensor(X_train, dtype=torch.float32)
@@ -57,20 +41,20 @@ def train_nn_model(filepath: str, num_epochs: int = 30, batch_size: int = 64, le
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
     
-    # Initialize model
+    # Initialize model with smaller embedding
     num_teams = int(max(X_train[:, 0].max(), X_train[:, 1].max() + 1))
-    embedding_dim = 64  # Increased embedding dimension
+    embedding_dim = 16  # Reduced embedding dimension to prevent overfitting
     model = MatchupPredictionModel(num_teams=num_teams, embedding_dim=embedding_dim, dropout_rate=dropout_rate)
     
     # Use Brier loss for better calibration
     criterion = BrierLoss()
     
-    # Use AdamW with weight decay for regularization
-    optimizer = optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=1e-4)
+    # Use AdamW with strong weight decay for regularization
+    optimizer = optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=1e-3)
     
     # More aggressive learning rate scheduling
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode='min', factor=0.3, patience=3, verbose=True, min_lr=1e-6
+        optimizer, mode='min', factor=0.5, patience=3, verbose=True, min_lr=1e-6
     )
     
     # Initialize loss tracker 
@@ -79,7 +63,7 @@ def train_nn_model(filepath: str, num_epochs: int = 30, batch_size: int = 64, le
     # Early stopping parameters
     best_loss = float('inf')
     best_model_state = None
-    patience = 10
+    patience = 7  # Reduced patience
     patience_counter = 0
     
     # Training loop
@@ -152,9 +136,11 @@ def train_nn_model(filepath: str, num_epochs: int = 30, batch_size: int = 64, le
     brier_score = brier_score_loss(all_targets, all_predictions)
     binary_predictions = [1 if p >= 0.5 else 0 for p in all_predictions]
     accuracy = accuracy_score(all_targets, binary_predictions)
+    logloss = log_loss(all_targets, all_predictions)
     
     print(f"Final Brier Score: {brier_score:.4f}")
     print(f"Final Accuracy: {accuracy:.4f}")
+    print(f"Final Log Loss: {logloss:.4f}")
     
     # Generate all evaluation plots
     evaluate_and_visualize_model(model, X_val, y_val, 'Neural_Network', 'visualizations')
@@ -174,23 +160,10 @@ def train_nn_model(filepath: str, num_epochs: int = 30, batch_size: int = 64, le
 def train_log_reg_model(filepath: str, num_epochs: int = 30, batch_size: int = 64, learning_rate: float = 0.001):
     """
     Train a logistic regression model with enhanced techniques
-    
-    Args:
-        filepath (str): Path to the dataset file
-        num_epochs (int): Maximum number of epochs for training
-        batch_size (int): Batch size for training
-        learning_rate (float): Initial learning rate for the optimizer
-    
-    Returns:
-        tuple: Trained model, brier score, and accuracy
     """
-    # Use time-based data split if available
-    try:
-        X_train, X_val, y_train, y_val, _ = load_time_based_data(filepath)
-        print("Using time-based data split for validation")
-    except:
-        X_train, X_val, y_train, y_val, _ = load_and_preprocess_data(filepath)
-        print("Using random data split for validation")
+    # Use time-based data split
+    X_train, X_val, y_train, y_val, _ = load_time_based_data(filepath)
+    print("Using time-based data split for validation")
 
     # Convert to pytorch tensors
     X_train_tensor = torch.tensor(X_train, dtype=torch.float32)
@@ -206,18 +179,18 @@ def train_log_reg_model(filepath: str, num_epochs: int = 30, batch_size: int = 6
     
     # Initialize model with batch normalization
     num_teams = int(max(X_train[:, 0].max(), X_train[:, 1].max() + 1))
-    embedding_dim = 64  # Increased from 32
+    embedding_dim = 16  # Reduced from 64
     model = LogRegsModel(num_teams=num_teams, embedding_dim=embedding_dim)
     
     # Use Brier loss
     criterion = BrierLoss()
     
     # Add weight decay for regularization
-    optimizer = optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=1e-4)
+    optimizer = optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=1e-3)
     
     # Add learning rate scheduler
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode='min', factor=0.3, patience=3, verbose=True
+        optimizer, mode='min', factor=0.5, patience=3, verbose=True
     )
     
     loss_tracker = LossTracker()
@@ -225,7 +198,7 @@ def train_log_reg_model(filepath: str, num_epochs: int = 30, batch_size: int = 6
     # Early stopping parameters
     best_loss = float('inf')
     best_model_state = None
-    patience = 10
+    patience = 7
     patience_counter = 0
     
     # Training loop
@@ -301,9 +274,11 @@ def train_log_reg_model(filepath: str, num_epochs: int = 30, batch_size: int = 6
     brier_score = brier_score_loss(all_targets, all_predictions)
     binary_predictions = [1 if p >= 0.5 else 0 for p in all_predictions]
     accuracy = accuracy_score(all_targets, binary_predictions)
+    logloss = log_loss(all_targets, all_predictions)
     
     print(f"Final Brier Score: {brier_score:.4f}")
     print(f"Final Accuracy: {accuracy:.4f}")
+    print(f"Final Log Loss: {logloss:.4f}")
     
     # Generate all evaluation plots
     evaluate_and_visualize_model(model, X_val, y_val, 'Logistic_Regression', 'visualizations')
@@ -323,23 +298,10 @@ def train_log_reg_model(filepath: str, num_epochs: int = 30, batch_size: int = 6
 def train_binary_classification_model(filepath:str, num_epochs: int = 30, batch_size: int = 64, learning_rate: float = 0.001): 
     """
     Train a binary classification model with improved techniques
-    
-    Args:
-        filepath (str): Path to the dataset file
-        num_epochs (int): Maximum number of epochs for training
-        batch_size (int): Batch size for training
-        learning_rate (float): Initial learning rate for the optimizer
-    
-    Returns:
-        tuple: Trained model, brier score, and accuracy
     """
-    # Use time-based data split if available
-    try:
-        X_train, X_val, y_train, y_val, _ = load_time_based_data(filepath)
-        print("Using time-based data split for validation")
-    except:
-        X_train, X_val, y_train, y_val, _ = load_and_preprocess_data(filepath)
-        print("Using random data split for validation")
+    # Use time-based data split
+    X_train, X_val, y_train, y_val, _ = load_time_based_data(filepath)
+    print("Using time-based data split for validation")
     
     # Convert to pytorch tensors
     X_train_tensor = torch.tensor(X_train, dtype=torch.float32)
@@ -355,18 +317,18 @@ def train_binary_classification_model(filepath:str, num_epochs: int = 30, batch_
     
     # Initialize model
     num_teams = int(max(X_train[:, 0].max(), X_train[:, 1].max() + 1))
-    embedding_dim = 64  # Increased from 32
+    embedding_dim = 16  # Reduced from 64
     model = BinaryClassificationModel(num_teams=num_teams, embedding_dim=embedding_dim)
     
     # Use Brier loss
     criterion = BrierLoss()
     
     # Add weight decay
-    optimizer = optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=1e-4)
+    optimizer = optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=1e-3)
     
     # Add learning rate scheduler
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode='min', factor=0.3, patience=3, verbose=True
+        optimizer, mode='min', factor=0.5, patience=3, verbose=True
     )
     
     # Initialize loss tracker
@@ -375,7 +337,7 @@ def train_binary_classification_model(filepath:str, num_epochs: int = 30, batch_
     # Early stopping parameters
     best_loss = float('inf')
     best_model_state = None
-    patience = 10
+    patience = 7
     patience_counter = 0
     
     # Training loop
@@ -451,9 +413,11 @@ def train_binary_classification_model(filepath:str, num_epochs: int = 30, batch_
     brier_score = brier_score_loss(all_targets, all_predictions)
     binary_predictions = [1 if p >= 0.5 else 0 for p in all_predictions]
     accuracy = accuracy_score(all_targets, binary_predictions)
+    logloss = log_loss(all_targets, all_predictions)
     
     print(f"Final Brier Score: {brier_score:.4f}")
     print(f"Final Accuracy: {accuracy:.4f}")
+    print(f"Final Log Loss: {logloss:.4f}")
     
     # Generate all evaluation plots
     evaluate_and_visualize_model(model, X_val, y_val, 'Binary_Classification', 'visualizations')

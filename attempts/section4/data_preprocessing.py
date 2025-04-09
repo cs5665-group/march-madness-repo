@@ -1,29 +1,29 @@
 import pandas as pd
 import numpy as np
-from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
-
+from sklearn.model_selection import train_test_split
 
 def load_and_preprocess_data(filepath: str) -> tuple:
     """
-    Load and preprocess the NCAA tournament data.
+    Load and preprocess data with random split.
     Args:
         filepath (str): Path to the dataset file.
     Returns:
-        X_train, X_test, y_train, y_test, team_ids: Processed training and testing data and unique team IDs.
+        tuple: X_train, X_test, y_train, y_test, team_ids
     """
     df = pd.read_csv(filepath)
-
-    # Calculate score difference and assign results
-    df['ScoreDiff'] = df['WScore'] - df['LScore']
-    df['Result'] = 1  # Winning team is labeled as 1
-
-    # Create a losing team version of the data
+    
+    # Create a copy of the dataframe with flipped teams to simulate losses
     losing_df = df.copy()
-    losing_df['WTeamID'], losing_df['LTeamID'] = losing_df['LTeamID'], losing_df['WTeamID']
-    losing_df['ScoreDiff'] = -losing_df['ScoreDiff']
-    losing_df['Result'] = 0  # Losing team is labeled as 0
-
+    losing_df['WTeamID'] = df['LTeamID']
+    losing_df['LTeamID'] = df['WTeamID']
+    losing_df['ScoreDiff'] = -1 * (df['WScore'] - df['LScore'])
+    losing_df['Result'] = 0 # Losing
+    
+    # Add result column to original dataframe
+    df['ScoreDiff'] = df['WScore'] - df['LScore']
+    df['Result'] = 1 # Winning
+    
     # Combine winning and losing data
     combined_df = pd.concat([df, losing_df], ignore_index=True)
 
@@ -35,7 +35,7 @@ def load_and_preprocess_data(filepath: str) -> tuple:
     team_ids = pd.concat([df['WTeamID'], df['LTeamID']]).unique()
 
     # Train-test split
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=42)
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
 
     # Standardize the score difference
     scaler = StandardScaler()
@@ -44,13 +44,11 @@ def load_and_preprocess_data(filepath: str) -> tuple:
 
     return X_train, X_test, y_train, y_test, team_ids
 
-def load_time_based_data(filepath: str):
+def load_time_based_data(filepath: str) -> tuple:
     """
-    Load and preprocess data with time-based split (more realistic for tournament predictions)
-    
+    Load and preprocess data with time-based split (more realistic for tournament predictions).
     Args:
-        filepath (str): Path to the dataset file
-    
+        filepath (str): Path to the dataset file.
     Returns:
         tuple: X_train, X_val, y_train, y_val, team_ids
     """
@@ -69,37 +67,48 @@ def load_time_based_data(filepath: str):
     
     print(f"Training on seasons {seasons[0]}-{seasons[-2]}, validating on season {val_season}")
     
-    # Process training data
-    X_train_data = []
-    y_train_data = []
+    # Process training data with flipped teams for losses
+    train_winning_df = train_df.copy()
+    train_winning_df['ScoreDiff'] = train_winning_df['WScore'] - train_winning_df['LScore']
+    train_winning_df['Result'] = 1  # Winning
     
-    for _, row in train_df.iterrows():
-        # Team 1 wins
-        X_train_data.append([row['WTeamID'], row['LTeamID'], row['WScore'] - row['LScore']])
-        y_train_data.append(1)
-        
-        # Team 2 wins (symmetric case)
-        X_train_data.append([row['LTeamID'], row['WTeamID'], row['LScore'] - row['WScore']])
-        y_train_data.append(0)
+    train_losing_df = train_df.copy()
+    train_losing_df['WTeamID'], train_losing_df['LTeamID'] = train_losing_df['LTeamID'], train_losing_df['WTeamID']
+    train_losing_df['ScoreDiff'] = -1 * (train_losing_df['WScore'] - train_losing_df['LScore'])
+    train_losing_df['Result'] = 0  # Losing
     
     # Process validation data
-    X_val_data = []
-    y_val_data = []
+    val_winning_df = val_df.copy()
+    val_winning_df['ScoreDiff'] = val_winning_df['WScore'] - val_winning_df['LScore']
+    val_winning_df['Result'] = 1  # Winning
     
-    for _, row in val_df.iterrows():
-        X_val_data.append([row['WTeamID'], row['LTeamID'], row['WScore'] - row['LScore']])
-        y_val_data.append(1)
-        
-        X_val_data.append([row['LTeamID'], row['WTeamID'], row['LScore'] - row['WScore']])
-        y_val_data.append(0)
+    val_losing_df = val_df.copy()
+    val_losing_df['WTeamID'], val_losing_df['LTeamID'] = val_losing_df['LTeamID'], val_losing_df['WTeamID']
+    val_losing_df['ScoreDiff'] = -1 * (val_losing_df['WScore'] - val_losing_df['LScore'])
+    val_losing_df['Result'] = 0  # Losing
     
-    # Convert to numpy arrays
-    X_train = np.array(X_train_data, dtype=np.float32)
-    y_train = np.array(y_train_data, dtype=np.float32)
-    X_val = np.array(X_val_data, dtype=np.float32)
-    y_val = np.array(y_val_data, dtype=np.float32)
+    # Combine datasets
+    train_combined_df = pd.concat([train_winning_df, train_losing_df], ignore_index=True)
+    val_combined_df = pd.concat([val_winning_df, val_losing_df], ignore_index=True)
+    
+    # Extract features and labels
+    X_train = train_combined_df[['WTeamID', 'LTeamID', 'ScoreDiff']].values
+    y_train = train_combined_df['Result'].values
+    
+    X_val = val_combined_df[['WTeamID', 'LTeamID', 'ScoreDiff']].values
+    y_val = val_combined_df['Result'].values
+    
+    # Standardize score differences
+    scaler = StandardScaler()
+    X_train[:, 2] = scaler.fit_transform(X_train[:, 2].reshape(-1, 1)).flatten()
+    X_val[:, 2] = scaler.transform(X_val[:, 2].reshape(-1, 1)).flatten()
     
     # Get all unique team IDs
-    team_ids = np.unique(np.concatenate([df['WTeamID'].unique(), df['LTeamID'].unique()]))
+    team_ids = np.unique(np.concatenate([
+        train_df['WTeamID'].unique(), 
+        train_df['LTeamID'].unique(),
+        val_df['WTeamID'].unique(), 
+        val_df['LTeamID'].unique()
+    ]))
     
     return X_train, X_val, y_train, y_val, team_ids

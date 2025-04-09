@@ -1,1 +1,1 @@
-{"num_teams": 1464, "embedding_dim": 64, "model_type": "binary_classification"}
+{"num_teams": 1464, "embedding_dim": 16, "model_type": "binary_classification"}
