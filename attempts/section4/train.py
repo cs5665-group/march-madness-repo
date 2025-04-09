@@ -5,7 +5,7 @@ import numpy as np
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader, TensorDataset
-from attempts.section4.data_preprocessing import load_and_preprocess_data
+from attempts.section4.data_preprocessing import load_and_preprocess_data, load_time_based_data
 from attempts.section4.models.neural_network_model import MatchupPredictionModel
 from attempts.section4.models.log_regs import LogRegsModel
 from attempts.section4.models.binary_class import BinaryClassificationModel
@@ -13,46 +13,76 @@ from sklearn.metrics import brier_score_loss, accuracy_score
 from attempts.section4.loss_tracker import LossTracker
 from attempts.section4.plotting import evaluate_and_visualize_model
 
-def train_nn_model(filepath: str, num_epochs: int = 10, batch_size: int = 64, learning_rate: float = 0.001): 
+class BrierLoss(nn.Module):
+    """Custom Brier Score Loss function"""
+    def __init__(self):
+        super(BrierLoss, self).__init__()
     
-    # load and preprocess data 
-    X_train, X_test, y_train, y_test, _ = load_and_preprocess_data(filepath)
+    def forward(self, input, target):
+        return torch.mean((input - target) ** 2)
+
+def train_nn_model(filepath: str, num_epochs: int = 30, batch_size: int = 64, learning_rate: float = 0.001, dropout_rate: float = 0.5): 
+    """
+    Train a neural network model with advanced techniques to minimize validation loss
+    
+    Args:
+        filepath (str): Path to the dataset file
+        num_epochs (int): Maximum number of epochs for training
+        batch_size (int): Batch size for training
+        learning_rate (float): Initial learning rate for the optimizer
+        dropout_rate (float): Dropout rate for regularization
+    
+    Returns:
+        tuple: Trained model, brier score, and accuracy
+    """
+    # Use time-based data split for more realistic validation
+    try:
+        # Try to load time-based split (recent seasons as validation)
+        X_train, X_val, y_train, y_val, _ = load_time_based_data(filepath)
+        print("Using time-based data split for validation")
+    except:
+        # Fall back to random split if time-based not available
+        X_train, X_val, y_train, y_val, _ = load_and_preprocess_data(filepath)
+        print("Using random data split for validation")
     
     # Convert to pytorch tensors
     X_train_tensor = torch.tensor(X_train, dtype=torch.float32)
     y_train_tensor = torch.tensor(y_train, dtype=torch.float32).view(-1, 1)
-    X_test_tensor = torch.tensor(X_test, dtype=torch.float32)
-    y_test_tensor = torch.tensor(y_test, dtype=torch.float32).view(-1, 1)
+    X_val_tensor = torch.tensor(X_val, dtype=torch.float32)
+    y_val_tensor = torch.tensor(y_val, dtype=torch.float32).view(-1, 1)
     
     # Create DataLoader
     train_dataset = TensorDataset(X_train_tensor, y_train_tensor)
-    test_dataset = TensorDataset(X_test_tensor, y_test_tensor)
+    val_dataset = TensorDataset(X_val_tensor, y_val_tensor)
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
+    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
     
     # Initialize model
     num_teams = int(max(X_train[:, 0].max(), X_train[:, 1].max() + 1))
-    model = MatchupPredictionModel(num_teams=num_teams)
-    criterion = nn.BCELoss()
-    optimizer = optim.Adam(model.parameters(), lr=learning_rate, weight_decay=1e-4)
+    embedding_dim = 64  # Increased embedding dimension
+    model = MatchupPredictionModel(num_teams=num_teams, embedding_dim=embedding_dim, dropout_rate=dropout_rate)
+    
+    # Use Brier loss for better calibration
+    criterion = BrierLoss()
+    
+    # Use AdamW with weight decay for regularization
+    optimizer = optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=1e-4)
+    
+    # More aggressive learning rate scheduling
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer, mode='min', factor=0.3, patience=3, verbose=True, min_lr=1e-6
+    )
     
     # Initialize loss tracker 
     loss_tracker = LossTracker()
         
-    all_predictions = []
-    all_targets = []
-    test_loss = 0
-    
-    
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode='min', factor=0.5, patience=5, verbose=True
-    )    
-    
-    # track best model
+    # Early stopping parameters
     best_loss = float('inf')
     best_model_state = None
+    patience = 10
+    patience_counter = 0
     
-    model.train()
+    # Training loop
     for epoch in range(num_epochs):
         model.train()
         total_loss = 0
@@ -63,122 +93,199 @@ def train_nn_model(filepath: str, num_epochs: int = 10, batch_size: int = 64, le
             loss = criterion(predictions, y_batch.squeeze())
             loss.backward()
             
-            # add gradient clipping to preventexploring gradients
+            # Gradient clipping to prevent exploding gradients
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             optimizer.step()
             total_loss += loss.item()
         
         train_loss = total_loss / len(train_loader)
             
+        # Validation phase
         model.eval()
         val_loss = 0
+        all_predictions = []
+        all_targets = []
+        
         with torch.no_grad():
-            for X_batch, y_batch in test_loader:
+            for X_batch, y_batch in val_loader:
                 predictions = model(X_batch).squeeze()
                 loss = criterion(predictions, y_batch.squeeze())
                 val_loss += loss.item()
-                all_predictions.append(predictions.numpy())
-                all_targets.append(y_batch.numpy())
-                test_loss += loss.item()
+                all_predictions.append(predictions.cpu().numpy())
+                all_targets.append(y_batch.cpu().numpy())
         
-        val_loss /= len(test_loader)
+        val_loss /= len(val_loader)
         
+        # Track losses for visualization
         loss_tracker.update(train_loss, val_loss)
+        
         # Apply learning rate scheduling
         scheduler.step(val_loss)
         
+        # Early stopping check
         if val_loss < best_loss:
             best_loss = val_loss
             best_model_state = model.state_dict().copy()
-        
-        print(f"Epoch {epoch+1}/{num_epochs}, Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}")
-        
+            patience_counter = 0
+            print(f"Epoch {epoch+1}/{num_epochs}, Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f} (best)")
+        else:
+            patience_counter += 1
+            print(f"Epoch {epoch+1}/{num_epochs}, Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}")
+            
+        # Early stopping
+        if patience_counter >= patience:
+            print(f"Early stopping triggered after {epoch+1} epochs")
+            break
     
     # Load the best model state
     model.load_state_dict(best_model_state)
     
-    # Create visualization directory
     os.makedirs('visualizations', exist_ok=True)
     
     loss_tracker.plot("Neural Network", save_pth='visualizations/nn_training_history.png')
     
+    # Concatenate all predictions and targets for final evaluation
     all_predictions = np.concatenate(all_predictions)
     all_targets = np.concatenate(all_targets)
     
+    # Calculate metrics
     brier_score = brier_score_loss(all_targets, all_predictions)
     binary_predictions = [1 if p >= 0.5 else 0 for p in all_predictions]
     accuracy = accuracy_score(all_targets, binary_predictions)
     
-    print(f"Brier Score: {brier_score:.4f}")
-    print(f"Accuracy: {accuracy:.4f}")
+    print(f"Final Brier Score: {brier_score:.4f}")
+    print(f"Final Accuracy: {accuracy:.4f}")
     
     # Generate all evaluation plots
-    evaluate_and_visualize_model(model, X_test, y_test, 'Neural Network', 'visualizations')
+    evaluate_and_visualize_model(model, X_val, y_val, 'Neural_Network', 'visualizations')
     
-    # Save the model
+    # Save the model with proper metadata
     torch.save(model.state_dict(), 'neural_net_model.pth')
     with open('model_metadata.json', 'w') as f:
-        json.dump({'num_teams': num_teams}, f)
-    print("Model saved as log_reg_model.pth")
+        json.dump({
+            'num_teams': int(num_teams),
+            'embedding_dim': embedding_dim,
+            'model_type': 'neural_network'
+        }, f)
+    print("Model saved as neural_net_model.pth")
     
+    return model, brier_score, accuracy
+
+def train_log_reg_model(filepath: str, num_epochs: int = 30, batch_size: int = 64, learning_rate: float = 0.001):
+    """
+    Train a logistic regression model with enhanced techniques
     
-def train_log_reg_model(filepath: str, num_epochs: int = 10, batch_size: int = 64, learning_rate: float = 0.001):
+    Args:
+        filepath (str): Path to the dataset file
+        num_epochs (int): Maximum number of epochs for training
+        batch_size (int): Batch size for training
+        learning_rate (float): Initial learning rate for the optimizer
     
-    # Load and preprocess data
-    X_train, X_test, y_train, y_test, _ = load_and_preprocess_data(filepath)
+    Returns:
+        tuple: Trained model, brier score, and accuracy
+    """
+    # Use time-based data split if available
+    try:
+        X_train, X_val, y_train, y_val, _ = load_time_based_data(filepath)
+        print("Using time-based data split for validation")
+    except:
+        X_train, X_val, y_train, y_val, _ = load_and_preprocess_data(filepath)
+        print("Using random data split for validation")
 
     # Convert to pytorch tensors
     X_train_tensor = torch.tensor(X_train, dtype=torch.float32)
     y_train_tensor = torch.tensor(y_train, dtype=torch.float32).view(-1, 1)
-    X_test_tensor = torch.tensor(X_test, dtype=torch.float32)
-    y_test_tensor = torch.tensor(y_test, dtype=torch.float32).view(-1, 1)
+    X_val_tensor = torch.tensor(X_val, dtype=torch.float32)
+    y_val_tensor = torch.tensor(y_val, dtype=torch.float32).view(-1, 1)
     
     # Create DataLoader
     train_dataset = TensorDataset(X_train_tensor, y_train_tensor)
-    test_dataset = TensorDataset(X_test_tensor, y_test_tensor)
+    val_dataset = TensorDataset(X_val_tensor, y_val_tensor)
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
+    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
     
-    # Initialize model
+    # Initialize model with batch normalization
     num_teams = int(max(X_train[:, 0].max(), X_train[:, 1].max() + 1))
-    model = LogRegsModel(num_teams=num_teams)
-    criterion = nn.BCELoss()  # Changed to BCELoss for binary classification with sigmoid
-    optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+    embedding_dim = 64  # Increased from 32
+    model = LogRegsModel(num_teams=num_teams, embedding_dim=embedding_dim)
+    
+    # Use Brier loss
+    criterion = BrierLoss()
+    
+    # Add weight decay for regularization
+    optimizer = optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=1e-4)
+    
+    # Add learning rate scheduler
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer, mode='min', factor=0.3, patience=3, verbose=True
+    )
     
     loss_tracker = LossTracker()
     
-    # Track training and validation losses
-    train_losses = []
-    val_losses = []
+    # Early stopping parameters
+    best_loss = float('inf')
+    best_model_state = None
+    patience = 10
+    patience_counter = 0
     
-    model.train()
+    # Training loop
     for epoch in range(num_epochs):
+        model.train()
         total_loss = 0
+        
         for X_batch, y_batch in train_loader:
             optimizer.zero_grad()
             predictions = model(X_batch).squeeze()
             loss = criterion(predictions, y_batch.squeeze())
             loss.backward()
+            
+            # Add gradient clipping
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+            
             optimizer.step()
             total_loss += loss.item()
         
         train_loss = total_loss / len(train_loader)
-        train_losses.append(train_loss)
         
-        # Validate after each epoch
+        # Validation phase
         model.eval()
         val_loss = 0
+        all_predictions = []
+        all_targets = []
+        
         with torch.no_grad():
-            for X_batch, y_batch in test_loader:
+            for X_batch, y_batch in val_loader:
                 predictions = model(X_batch).squeeze()
                 loss = criterion(predictions, y_batch.squeeze())
                 val_loss += loss.item()
+                all_predictions.append(predictions.cpu().numpy())
+                all_targets.append(y_batch.cpu().numpy())
         
-        val_loss /= len(test_loader)
-        val_losses.append(val_loss)
+        val_loss /= len(val_loader)
         
+        # Track losses for visualization
         loss_tracker.update(train_loss, val_loss)
-        print(f"Epoch {epoch+1}/{num_epochs}, Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}")
+        
+        # Apply learning rate scheduling
+        scheduler.step(val_loss)
+        
+        # Early stopping check
+        if val_loss < best_loss:
+            best_loss = val_loss
+            best_model_state = model.state_dict().copy()
+            patience_counter = 0
+            print(f"Epoch {epoch+1}/{num_epochs}, Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f} (best)")
+        else:
+            patience_counter += 1
+            print(f"Epoch {epoch+1}/{num_epochs}, Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}")
+        
+        # Early stopping
+        if patience_counter >= patience:
+            print(f"Early stopping triggered after {epoch+1} epochs")
+            break
+    
+    # Load best model
+    model.load_state_dict(best_model_state)
     
     # Create visualization directory
     os.makedirs('visualizations', exist_ok=True)
@@ -186,103 +293,149 @@ def train_log_reg_model(filepath: str, num_epochs: int = 10, batch_size: int = 6
     # Plot training history
     loss_tracker.plot("Logistic Regression", save_pth='visualizations/log_reg_training_history.png')
     
-    # Evaluate on test data
-    all_predictions = []
-    all_targets = []
-    test_loss = 0
-    
-    with torch.no_grad():
-        for X_batch, y_batch in test_loader:
-            predictions = model(X_batch).squeeze()
-            loss = criterion(predictions, y_batch.squeeze())
-            test_loss += loss.item()
-            
-            # Store predictions and targets for further analysis
-            all_predictions.append(predictions.numpy())
-            all_targets.append(y_batch.numpy())
-
+    # Concatenate all predictions and targets
     all_predictions = np.concatenate(all_predictions)
     all_targets = np.concatenate(all_targets)
     
+    # Calculate metrics
     brier_score = brier_score_loss(all_targets, all_predictions)
     binary_predictions = [1 if p >= 0.5 else 0 for p in all_predictions]
     accuracy = accuracy_score(all_targets, binary_predictions)
     
-    print(f"Test Loss: {test_loss/len(test_loader):.4f}")
-    print(f"Brier Score: {brier_score:.4f}")
-    print(f"Accuracy: {accuracy:.4f}")
+    print(f"Final Brier Score: {brier_score:.4f}")
+    print(f"Final Accuracy: {accuracy:.4f}")
     
     # Generate all evaluation plots
-    evaluate_and_visualize_model(model, X_test, y_test, 'Logistic Regression', 'visualizations')
+    evaluate_and_visualize_model(model, X_val, y_val, 'Logistic_Regression', 'visualizations')
     
-    # Save the model
+    # Save the model with metadata
     torch.save(model.state_dict(), 'log_reg_model.pth')
     with open('model_metadata.json', 'w') as f:
-        json.dump({'num_teams': num_teams}, f)
+        json.dump({
+            'num_teams': int(num_teams),
+            'embedding_dim': embedding_dim,
+            'model_type': 'log_reg'
+        }, f)
     print("Model saved as log_reg_model.pth")
     
-    
-def train_binary_classification_model(filepath:str, num_epochs: int = 10, batch_size: int = 64, learning_rate: float = 0.001): 
+    return model, brier_score, accuracy
+
+def train_binary_classification_model(filepath:str, num_epochs: int = 30, batch_size: int = 64, learning_rate: float = 0.001): 
     """
-    Train a binary classification model using the provided dataset.
+    Train a binary classification model with improved techniques
+    
     Args:
-        filepath (str): Path to the dataset file.
-        num_epochs (int): Number of epochs for training.
-        batch_size (int): Batch size for training.
-        learning_rate (float): Learning rate for the optimizer.
-    """
+        filepath (str): Path to the dataset file
+        num_epochs (int): Maximum number of epochs for training
+        batch_size (int): Batch size for training
+        learning_rate (float): Initial learning rate for the optimizer
     
-    # Load and preprocess data
-    X_train, X_test, y_train, y_test, _ = load_and_preprocess_data(filepath)
+    Returns:
+        tuple: Trained model, brier score, and accuracy
+    """
+    # Use time-based data split if available
+    try:
+        X_train, X_val, y_train, y_val, _ = load_time_based_data(filepath)
+        print("Using time-based data split for validation")
+    except:
+        X_train, X_val, y_train, y_val, _ = load_and_preprocess_data(filepath)
+        print("Using random data split for validation")
     
     # Convert to pytorch tensors
     X_train_tensor = torch.tensor(X_train, dtype=torch.float32)
     y_train_tensor = torch.tensor(y_train, dtype=torch.float32).view(-1, 1)
-    X_test_tensor = torch.tensor(X_test, dtype=torch.float32)
-    y_test_tensor = torch.tensor(y_test, dtype=torch.float32).view(-1, 1)
+    X_val_tensor = torch.tensor(X_val, dtype=torch.float32)
+    y_val_tensor = torch.tensor(y_val, dtype=torch.float32).view(-1, 1)
     
     # Create DataLoader
     train_dataset = TensorDataset(X_train_tensor, y_train_tensor)
-    test_dataset = TensorDataset(X_test_tensor, y_test_tensor)
+    val_dataset = TensorDataset(X_val_tensor, y_val_tensor)
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
+    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
     
     # Initialize model
     num_teams = int(max(X_train[:, 0].max(), X_train[:, 1].max() + 1))
-    model = BinaryClassificationModel(num_teams=num_teams)
-    criterion = nn.BCELoss()  # Changed to BCELoss for binary classification with sigmoid
+    embedding_dim = 64  # Increased from 32
+    model = BinaryClassificationModel(num_teams=num_teams, embedding_dim=embedding_dim)
     
-    optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+    # Use Brier loss
+    criterion = BrierLoss()
+    
+    # Add weight decay
+    optimizer = optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=1e-4)
+    
+    # Add learning rate scheduler
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer, mode='min', factor=0.3, patience=3, verbose=True
+    )
     
     # Initialize loss tracker
     loss_tracker = LossTracker()
     
-    model.train()
+    # Early stopping parameters
+    best_loss = float('inf')
+    best_model_state = None
+    patience = 10
+    patience_counter = 0
+    
+    # Training loop
     for epoch in range(num_epochs):
+        model.train()
         total_loss = 0
+        
         for X_batch, y_batch in train_loader:
             optimizer.zero_grad()
             predictions = model(X_batch).squeeze()
             loss = criterion(predictions, y_batch.squeeze())
             loss.backward()
+            
+            # Add gradient clipping
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+            
             optimizer.step()
             total_loss += loss.item()
         
         train_loss = total_loss / len(train_loader)
         
-        # Validate after each epoch
+        # Validation phase
         model.eval()
         val_loss = 0
+        all_predictions = []
+        all_targets = []
+        
         with torch.no_grad():
-            for X_batch, y_batch in test_loader:
+            for X_batch, y_batch in val_loader:
                 predictions = model(X_batch).squeeze()
                 loss = criterion(predictions, y_batch.squeeze())
                 val_loss += loss.item()
+                all_predictions.append(predictions.cpu().numpy())
+                all_targets.append(y_batch.cpu().numpy())
         
-        val_loss /= len(test_loader)
+        val_loss /= len(val_loader)
         
+        # Track losses for visualization
         loss_tracker.update(train_loss, val_loss)
-        print(f"Epoch {epoch+1}/{num_epochs}, Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}")
+        
+        # Apply learning rate scheduling
+        scheduler.step(val_loss)
+        
+        # Early stopping check
+        if val_loss < best_loss:
+            best_loss = val_loss
+            best_model_state = model.state_dict().copy()
+            patience_counter = 0
+            print(f"Epoch {epoch+1}/{num_epochs}, Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f} (best)")
+        else:
+            patience_counter += 1
+            print(f"Epoch {epoch+1}/{num_epochs}, Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}")
+        
+        # Early stopping
+        if patience_counter >= patience:
+            print(f"Early stopping triggered after {epoch+1} epochs")
+            break
+    
+    # Load best model
+    model.load_state_dict(best_model_state)
     
     # Create visualization directory
     os.makedirs('visualizations', exist_ok=True)
@@ -290,36 +443,29 @@ def train_binary_classification_model(filepath:str, num_epochs: int = 10, batch_
     # Plot training history
     loss_tracker.plot("Binary Classification", save_pth='visualizations/binary_class_training_history.png')
         
-    # Evaluate on test data
-    all_predictions = []
-    all_targets = []
-    test_loss = 0
-    
-    with torch.no_grad():
-        for X_batch, y_batch in test_loader:
-            predictions = model(X_batch).squeeze()
-            loss = criterion(predictions, y_batch.squeeze())
-            test_loss += loss.item()
-            
-            # Store predictions and targets for further analysis
-            all_predictions.append(predictions.numpy())
-            all_targets.append(y_batch.numpy())
-            
+    # Final evaluation
     all_predictions = np.concatenate(all_predictions)
     all_targets = np.concatenate(all_targets)
+    
+    # Calculate metrics
     brier_score = brier_score_loss(all_targets, all_predictions)
     binary_predictions = [1 if p >= 0.5 else 0 for p in all_predictions]
     accuracy = accuracy_score(all_targets, binary_predictions)
     
-    print(f"Test Loss: {test_loss/len(test_loader):.4f}")
-    print(f"Brier Score: {brier_score:.4f}")
-    print(f"Accuracy: {accuracy:.4f}")
+    print(f"Final Brier Score: {brier_score:.4f}")
+    print(f"Final Accuracy: {accuracy:.4f}")
     
     # Generate all evaluation plots
-    evaluate_and_visualize_model(model, X_test, y_test, 'Binary Classification', 'visualizations')
+    evaluate_and_visualize_model(model, X_val, y_val, 'Binary_Classification', 'visualizations')
     
-    # Save the model
+    # Save the model with metadata
     torch.save(model.state_dict(), 'binary_class_model.pth')
     with open('model_metadata.json', 'w') as f:
-        json.dump({'num_teams': num_teams}, f)
+        json.dump({
+            'num_teams': int(num_teams),
+            'embedding_dim': embedding_dim,
+            'model_type': 'binary_classification'
+        }, f)
     print("Model saved as binary_class_model.pth")
+    
+    return model, brier_score, accuracy
