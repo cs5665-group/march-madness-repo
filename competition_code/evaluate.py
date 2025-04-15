@@ -3,9 +3,9 @@ import torch
 import json
 import pandas as pd
 import os
-from attempts.section4.models.neural_network_model import MatchupPredictionModel
-from attempts.section4.models.log_regs import LogRegsModel
-from attempts.section4.models.binary_class import BinaryClassificationModel
+from competition_code.models.neural_network_model import MatchupPredictionModel
+from competition_code.models.log_regs import LogRegsModel
+from competition_code.models.binary_class import BinaryClassificationModel
 
 def generate_all_matchups(team_ids, season=2025) -> pd.DataFrame:
     """

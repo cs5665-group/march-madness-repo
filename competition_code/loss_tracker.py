@@ -1,4 +1,4 @@
-from attempts.section4.plotting import plot_training_history
+from competition_code.plotting import plot_training_history
 
 class LossTracker:
     def __init__(self):

@@ -5,13 +5,13 @@ import numpy as np
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader, TensorDataset
-from attempts.section4.data_preprocessing import load_time_based_data
-from attempts.section4.models.neural_network_model import MatchupPredictionModel
-from attempts.section4.models.log_regs import LogRegsModel
-from attempts.section4.models.binary_class import BinaryClassificationModel
+from competition_code.data_preprocessing import load_time_based_data
+from competition_code.models.neural_network_model import MatchupPredictionModel
+from competition_code.models.log_regs import LogRegsModel
+from competition_code.models.binary_class import BinaryClassificationModel
+from competition_code.loss_tracker import LossTracker
+from competition_code.plotting import evaluate_and_visualize_model
 from sklearn.metrics import brier_score_loss, accuracy_score, log_loss
-from attempts.section4.loss_tracker import LossTracker
-from attempts.section4.plotting import evaluate_and_visualize_model
 
 class BrierLoss(nn.Module):
     """Custom Brier Score Loss function"""

@@ -1,7 +1,7 @@
-from attempts.section4.data_preprocessing import load_and_preprocess_data
-from attempts.section4.evaluate import generate_nerual_net_sub, generate_log_regs_sub, generate_binnary_class_sub
-from attempts.section4.train import train_nn_model, train_log_reg_model, train_binary_classification_model
-from attempts.section4.plotting import visualize_data_distribution
+from competition_code.data_preprocessing import load_and_preprocess_data
+from competition_code.evaluate import generate_nerual_net_sub, generate_log_regs_sub, generate_binnary_class_sub
+from competition_code.train import train_nn_model, train_log_reg_model, train_binary_classification_model
+from competition_code.plotting import visualize_data_distribution
 
 
 if __name__ == "__main__":
@@ -50,7 +50,6 @@ if __name__ == "__main__":
     generate_log_regs_sub(team_ids, log_reg_path)
     generate_binnary_class_sub(team_ids, binary_class_path)
     
-    # Print summary of model performance
     print("\n=== Model Performance Summary ===")
     print(f"Neural Network:        Brier Score = {nn_brier:.4f}, Accuracy = {nn_acc:.4f}")
     print(f"Logistic Regression:   Brier Score = {log_brier:.4f}, Accuracy = {log_acc:.4f}")
