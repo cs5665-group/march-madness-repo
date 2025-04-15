@@ -5,7 +5,7 @@ class LogRegsModel(nn.Module):
     """
     Logistic regression model for predicting match outcomes.
     """
-    def __init__(self, num_teams: int, embedding_dim=16):
+    def __init__(self, num_teams: int, embedding_dim=16) -> None:
         super(LogRegsModel, self).__init__()
         self.team_embedding = nn.Embedding(num_teams, embedding_dim)
         

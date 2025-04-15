@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 
 class BinaryClassificationModel(nn.Module):
-    def __init__(self, num_teams: int, embedding_dim=16):
+    def __init__(self, num_teams: int, embedding_dim=16) -> None:
         super(BinaryClassificationModel, self).__init__()
         
         # Team embeddings

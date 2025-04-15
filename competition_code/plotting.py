@@ -5,10 +5,14 @@ import torch
 import os
 import seaborn as sns
 from sklearn.metrics import confusion_matrix, roc_curve, auc, precision_recall_curve
-from torch.utils.data import Dataset, DataLoader, TensorDataset
+from torch.utils.data import DataLoader, TensorDataset
+from sklearn.decomposition import PCA
+from sklearn.calibration import calibration_curve
+from sklearn.metrics import brier_score_loss
 
 
-def plot_training_history(train_losses, val_losses, model_name='Model', save_path=None):
+
+def plot_training_history(train_losses, val_losses, model_name='Model', save_path=None) -> None:
     """
     Plot training and validation loss curves
     
@@ -47,7 +51,7 @@ def plot_training_history(train_losses, val_losses, model_name='Model', save_pat
         plt.show()
     plt.close()
 
-def plot_confusion_matrix(y_true, y_pred, model_name='Model', save_path=None):
+def plot_confusion_matrix(y_true, y_pred, model_name='Model', save_path=None) -> None:
     """
     Plot confusion matrix
     
@@ -89,7 +93,7 @@ def plot_confusion_matrix(y_true, y_pred, model_name='Model', save_path=None):
     plt.close()
     
     
-def plot_roc_curve(y_true, y_pred, model_name='Model', save_path=None):
+def plot_roc_curve(y_true, y_pred, model_name='Model', save_path=None) -> None:
     """
     Plot ROC curve
     
@@ -122,7 +126,7 @@ def plot_roc_curve(y_true, y_pred, model_name='Model', save_path=None):
         plt.show()
     plt.close()
 
-def plot_precision_recall_curve(y_true, y_pred, model_name='Model', save_path=None):
+def plot_precision_recall_curve(y_true, y_pred, model_name='Model', save_path=None) -> None:
     """
     Plot precision-recall curve
     
@@ -155,7 +159,7 @@ def plot_precision_recall_curve(y_true, y_pred, model_name='Model', save_path=No
         plt.show()
     plt.close()
 
-def plot_team_embeddings(model, num_teams, team_names=None, model_name='Model', save_path=None):
+def plot_team_embeddings(model, num_teams, team_names=None, model_name='Model', save_path=None) -> None:
     """
     Plot team embeddings in 2D space using PCA
     
@@ -166,7 +170,6 @@ def plot_team_embeddings(model, num_teams, team_names=None, model_name='Model', 
         model_name: Name of the model for the title
         save_path: Path to save the figure
     """
-    from sklearn.decomposition import PCA
     
     # Get team embeddings from model
     with torch.no_grad():
@@ -202,7 +205,7 @@ def plot_team_embeddings(model, num_teams, team_names=None, model_name='Model', 
         plt.show()
     plt.close()
 
-def plot_prediction_distribution(y_pred, model_name='Model', save_path=None):
+def plot_prediction_distribution(y_pred, model_name='Model', save_path=None) -> None:
     """
     Plot the distribution of predicted probabilities
     
@@ -229,7 +232,7 @@ def plot_prediction_distribution(y_pred, model_name='Model', save_path=None):
         plt.show()
     plt.close()
 
-def plot_calibration_curve(y_true, y_pred, model_name='Model', n_bins=10, save_path=None):
+def plot_calibration_curve(y_true, y_pred, model_name='Model', n_bins=10, save_path=None) -> None:
     """
     Plot calibration curve (reliability diagram)
     
@@ -240,7 +243,6 @@ def plot_calibration_curve(y_true, y_pred, model_name='Model', n_bins=10, save_p
         n_bins: Number of bins for the histogram
         save_path: Path to save the figure
     """
-    from sklearn.calibration import calibration_curve
     
     # Calculate calibration curve
     prob_true, prob_pred = calibration_curve(y_true, y_pred, n_bins=n_bins)
@@ -256,7 +258,6 @@ def plot_calibration_curve(y_true, y_pred, model_name='Model', n_bins=10, save_p
     plt.grid(True, linestyle='--', alpha=0.7)
     
     # Calculate and display Brier score
-    from sklearn.metrics import brier_score_loss
     brier = brier_score_loss(y_true, y_pred)
     plt.annotate(f'Brier Score: {brier:.4f}', 
                 xy=(0.02, 0.95), xycoords='axes fraction')

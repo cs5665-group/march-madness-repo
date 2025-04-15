@@ -3,7 +3,7 @@ import torch.nn as nn
 
 class MatchupPredictionModel(nn.Module):
     
-    def __init__(self, num_teams: int, embedding_dim=32, dropout_rate=0.4):
+    def __init__(self, num_teams: int, embedding_dim=32, dropout_rate=0.4) -> None:
         """
         Neural network model for predicting match outcomes.
         Args:
@@ -29,7 +29,7 @@ class MatchupPredictionModel(nn.Module):
         
         self.__initialize_weights()
         
-    def __initialize_weights(self): 
+    def __initialize_weights(self) -> None: 
         """
         Initialize weights of the model.
         """
